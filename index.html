@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A Jev-driven embodied interaction demo for gesture media control and calibrated gaze close intent."
+    />
+    <title>Jev Embodied Media Agent</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">J</span>
+          <div>
+            <strong>Jev Media Agent</strong>
+            <span>typed decisions · private vision</span>
+          </div>
+        </div>
+        <div class="topbar-status">
+          <span class="status-dot" id="provider-dot"></span>
+          <span id="provider-label">连接决策服务…</span>
+        </div>
+        <button
+          id="gaze-target"
+          class="gaze-target"
+          type="button"
+          aria-label="持续凝视关闭目标"
+          title="完成凝视校准后，持续注视这里 3 秒"
+        >
+          <span class="gaze-progress" id="gaze-progress"></span>
+          <span class="gaze-icon">×</span>
+          <span class="gaze-label" id="gaze-label">凝视关闭</span>
+        </button>
+      </header>
+
+      <main class="workspace">
+        <section class="stage-panel panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">MEDIA STAGE</p>
+              <h1>用手势控制视频</h1>
+            </div>
+            <label class="file-button">
+              <input id="video-file" type="file" accept="video/*" />
+              选择本地视频
+            </label>
+          </div>
+
+          <div class="video-shell" id="video-shell">
+            <video id="media" controls playsinline></video>
+            <div class="empty-state" id="empty-state">
+              <span class="empty-icon">▶</span>
+              <strong>载入一个本地视频开始体验</strong>
+              <small>视频保留在当前浏览器中，不会上传。</small>
+            </div>
+
+            <div class="camera-card">
+              <video id="camera" autoplay muted playsinline></video>
+              <div class="camera-overlay">
+                <span class="live-dot"></span>
+                <span id="camera-label">摄像头未启动</span>
+              </div>
+            </div>
+
+            <div class="action-toast" id="action-toast" aria-live="polite"></div>
+          </div>
+
+          <div class="media-readout">
+            <div>
+              <span>播放状态</span>
+              <strong id="play-state">等待视频</strong>
+            </div>
+            <div>
+              <span>播放速度</span>
+              <strong id="rate-state">1.00×</strong>
+            </div>
+            <div>
+              <span>当前手势</span>
+              <strong id="gesture-state">—</strong>
+            </div>
+            <div>
+              <span>识别置信度</span>
+              <strong id="gesture-confidence">0%</strong>
+            </div>
+          </div>
+        </section>
+
+        <aside class="agent-panel panel">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">SYSTEM ONE</p>
+              <h2>Jev 决策层</h2>
+            </div>
+            <span class="provider-pill" id="provider-pill">—</span>
+          </div>
+
+          <div class="decision-card">
+            <span>最近动作</span>
+            <strong id="decision-action">NONE</strong>
+            <div class="confidence-row">
+              <div class="confidence-track">
+                <span id="confidence-bar"></span>
+              </div>
+              <span id="decision-confidence">0%</span>
+            </div>
+            <small id="decision-meta">等待结构化感知输入</small>
+          </div>
+
+          <section class="setup-section">
+            <div class="section-title">
+              <h3>1. 视觉感知</h3>
+              <span id="vision-status" class="mini-status">未启动</span>
+            </div>
+            <button id="start-camera" class="primary-button" type="button">
+              启动摄像头与模型
+            </button>
+            <p class="hint">
+              MediaPipe 在浏览器本地处理画面；仅手势、凝视分数和播放器状态会发送给决策服务。
+            </p>
+          </section>
+
+          <section class="setup-section">
+            <div class="section-title">
+              <h3>2. 凝视校准</h3>
+              <span id="calibration-status" class="mini-status">未校准</span>
+            </div>
+            <div class="calibration-buttons">
+              <button id="calibrate-center" class="secondary-button" type="button" disabled>
+                校准屏幕中心
+              </button>
+              <button id="calibrate-close" class="secondary-button" type="button" disabled>
+                校准右上角
+              </button>
+            </div>
+            <div class="gaze-readout">
+              <div class="gaze-meter"><span id="gaze-meter-fill"></span></div>
+              <span id="gaze-score">目标分数 0%</span>
+            </div>
+            <p class="hint">
+              先凝视播放器中心并校准，再点击“校准右上角”并注视关闭目标。未经双点校准不会触发关闭。
+            </p>
+          </section>
+
+          <section class="gesture-guide">
+            <h3>手势映射</h3>
+            <div class="gesture-grid">
+              <div><span>✋</span><strong>暂停</strong><small>Open Palm</small></div>
+              <div><span>✊</span><strong>继续</strong><small>Closed Fist</small></div>
+              <div><span>👍</span><strong>加速</strong><small>Thumb Up</small></div>
+              <div><span>👎</span><strong>减速</strong><small>Thumb Down</small></div>
+            </div>
+          </section>
+
+          <section class="event-section">
+            <div class="section-title">
+              <h3>事件记录</h3>
+              <button id="clear-log" class="text-button" type="button">清空</button>
+            </div>
+            <ol id="event-log" class="event-log">
+              <li><time>—</time><span>等待启动</span></li>
+            </ol>
+          </section>
+        </aside>
+      </main>
+
+      <footer>
+        <span>所有不可逆动作都受本地安全规则约束，模型无法绕过凝视校准与持续时间要求。</span>
+        <span>Jev contract · MediaPipe Tasks Vision</span>
+      </footer>
+    </div>
+
+    <div id="closed-screen" class="closed-screen" hidden>
+      <div>
+        <span class="closed-mark">×</span>
+        <h2>会话已由凝视操作关闭</h2>
+        <p>浏览器阻止普通网页关闭自身时，应用会安全退出到这个界面。</p>
+        <button id="reopen-session" class="primary-button" type="button">重新打开会话</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
