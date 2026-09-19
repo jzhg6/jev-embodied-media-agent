@@ -1,6 +1,6 @@
 import type {
   AgentAction,
-  DecisionResult,
+  JevJudgment,
   PerceptionState,
 } from "../shared/types.js";
 
@@ -13,6 +13,8 @@ export const ACTIONS: AgentAction[] = [
   "close_page",
 ];
 
+export const GESTURE_STABLE_MS = 300;
+
 const gestureActions: Record<string, AgentAction> = {
   Open_Palm: "pause",
   Closed_Fist: "play",
@@ -20,34 +22,61 @@ const gestureActions: Record<string, AgentAction> = {
   Thumb_Down: "slow_down",
 };
 
-export function ruleDecision(
+export function ruleJudgment(
   state: PerceptionState,
   latencyMs = 0,
-): DecisionResult {
-  let action: AgentAction = "none";
-  let confidence = 0.9;
+): JevJudgment {
+  let candidateAction: AgentAction = "none";
 
   if (state.gaze.ready && state.safety.allowClose) {
-    action = "close_page";
-    confidence = Math.max(0.9, state.gaze.topRightScore);
+    candidateAction = "close_page";
   } else if (
-    state.media.hasSource &&
-    state.gesture.confidence >= 0.72 &&
-    state.gesture.stableMs >= 350
+    state.gesture.confidence >= 0.55 &&
+    state.gesture.stableMs >= GESTURE_STABLE_MS
   ) {
-    action = gestureActions[state.gesture.name] ?? "none";
-    confidence = action === "none" ? 0.8 : state.gesture.confidence;
+    candidateAction = gestureActions[state.gesture.name] ?? "none";
   }
 
-  const remainder = (1 - confidence) / Math.max(1, ACTIONS.length - 1);
+  const candidateProbability =
+    candidateAction === "close_page"
+      ? Math.max(0.9, state.gaze.topRightScore)
+      : candidateAction === "none"
+        ? 0.88
+        : Math.max(0.01, Math.min(0.99, state.gesture.confidence));
+  const remainder = (1 - candidateProbability) / Math.max(1, ACTIONS.length - 1);
   const probabilities = Object.fromEntries(
-    ACTIONS.map((candidate) => [candidate, candidate === action ? confidence : remainder]),
+    ACTIONS.map((candidate) => [
+      candidate,
+      candidate === candidateAction ? candidateProbability : remainder,
+    ]),
+  ) as Record<AgentAction, number>;
+
+  const entropy = -Object.values(probabilities).reduce(
+    (sum, probability) =>
+      sum + (probability > 0 ? probability * Math.log(probability) : 0),
+    0,
   );
+  const confidence = Math.max(0, 1 - entropy / Math.log(ACTIONS.length));
+  const stableFactor = Math.min(1, state.gesture.stableMs / GESTURE_STABLE_MS);
+  const intentionalControlProbability =
+    candidateAction === "close_page"
+      ? 0.98
+      : candidateAction === "none"
+        ? 0.08
+        : Math.min(0.99, state.gesture.confidence * stableFactor);
+  const signalQualityScore =
+    candidateAction === "close_page"
+      ? Math.min(2, state.gaze.topRightScore * 2)
+      : candidateAction === "none"
+        ? 0
+        : Math.min(2, Math.max(0, (state.gesture.confidence - 0.45) * 5));
 
   return {
-    action,
+    candidateAction,
     confidence,
     probabilities,
+    intentionalControlProbability,
+    signalQualityScore,
     closeIntentProbability: state.gaze.ready
       ? Math.max(0.95, state.gaze.topRightScore)
       : Math.min(0.49, state.gaze.topRightScore * 0.5),
@@ -71,13 +100,13 @@ export function buildJevRequest(state: PerceptionState, model: string) {
         criteria: {
           none: "No intentional supported command is currently present.",
           pause:
-            "The video has a source and a stable, confident Open_Palm gesture is present.",
+            "A stable, confident Open_Palm gesture requests that playback pause.",
           play:
-            "The video has a source and a stable, confident Closed_Fist gesture is present.",
+            "A stable, confident Closed_Fist gesture requests that playback continue.",
           speed_up:
-            "The video has a source and a stable, confident Thumb_Up gesture is present.",
+            "A stable, confident Thumb_Up gesture requests faster playback.",
           slow_down:
-            "The video has a source and a stable, confident Thumb_Down gesture is present.",
+            "A stable, confident Thumb_Down gesture requests slower playback.",
           close_page:
             "A calibrated gaze has continuously remained on the top-right close target for the full dwell period, and the safety state explicitly allows closing.",
         },
@@ -86,6 +115,21 @@ export function buildJevRequest(state: PerceptionState, model: string) {
         type: "noul",
         instructions:
           "Is there strong evidence of an intentional page-close request? It is true only when gaze calibration exists, the continuous dwell completed, and safety.allowClose is true.",
+      },
+      intentional_control: {
+        type: "noul",
+        instructions:
+          "Does the structured sensor state show a deliberate, stable command from the person, rather than a transient pose or ambiguous observation?",
+      },
+      signal_quality: {
+        type: "score",
+        instructions:
+          "Rate whether the current sensor evidence is reliable enough for an embodied controller to act on immediately.",
+        criteria: [
+          "Unreliable: missing, unstable, or contradictory evidence",
+          "Ambiguous: plausible evidence but meaningful uncertainty remains",
+          "Reliable: stable, confident, and internally consistent evidence",
+        ],
       },
     },
   };
@@ -101,6 +145,7 @@ export function isPerceptionState(value: unknown): value is PerceptionState {
       candidate.gaze &&
       typeof candidate.gaze.ready === "boolean" &&
       candidate.media &&
+      typeof candidate.media.ready === "boolean" &&
       typeof candidate.media.playbackRate === "number" &&
       candidate.safety &&
       typeof candidate.safety.allowClose === "boolean",

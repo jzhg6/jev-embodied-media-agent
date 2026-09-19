@@ -98,7 +98,7 @@
           </div>
 
           <div class="decision-card">
-            <span>最近动作</span>
+            <span>最终动作</span>
             <strong id="decision-action">NONE</strong>
             <div class="confidence-row">
               <div class="confidence-track">
@@ -107,7 +107,25 @@
               <span id="decision-confidence">0%</span>
             </div>
             <small id="decision-meta">等待结构化感知输入</small>
+            <div class="primitive-grid">
+              <div><span>CHOICE</span><strong id="choice-output">none · 0%</strong></div>
+              <div><span>NOUL 意图</span><strong id="intent-output">0%</strong></div>
+              <div><span>SCORE 质量</span><strong id="quality-output">0.00 / 2</strong></div>
+            </div>
           </div>
+
+          <section class="pipeline-section">
+            <div class="section-title">
+              <h3>Jev-like 执行流水线</h3>
+              <span class="mini-status">可观察</span>
+            </div>
+            <ol class="pipeline-trace">
+              <li><span>1 · 感知</span><strong id="trace-perception">等待传感器输入</strong></li>
+              <li><span>2 · 判断</span><strong id="trace-judgment">等待 System One</strong></li>
+              <li><span>3 · 过滤</span><strong id="trace-filter">尚未运行</strong></li>
+              <li><span>4 · 执行</span><strong id="trace-actuator">尚未执行</strong></li>
+            </ol>
+          </section>
 
           <section class="setup-section">
             <div class="section-title">
@@ -151,6 +169,15 @@
               <div><span>✊</span><strong>继续</strong><small>Closed Fist</small></div>
               <div><span>👍</span><strong>加速</strong><small>Thumb Up</small></div>
               <div><span>👎</span><strong>减速</strong><small>Thumb Down</small></div>
+            </div>
+            <div class="simulation-lab">
+              <span>教学测试（同样经过 Jev-like 决策与过滤）</span>
+              <div>
+                <button class="text-button simulate-gesture" data-gesture="Open_Palm" type="button">模拟暂停</button>
+                <button class="text-button simulate-gesture" data-gesture="Closed_Fist" type="button">模拟继续</button>
+                <button class="text-button simulate-gesture" data-gesture="Thumb_Up" type="button">模拟加速</button>
+                <button class="text-button simulate-gesture" data-gesture="Thumb_Down" type="button">模拟减速</button>
+              </div>
             </div>
           </section>
 

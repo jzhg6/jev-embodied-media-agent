@@ -1,6 +1,8 @@
 # Jev Embodied Media Agent
 
-一个隐私优先的人机交互原型：浏览器摄像头在本地识别手势与凝视，Jev 从受限动作空间中选择媒体控制操作。
+一个隐私优先的人机交互原型：浏览器摄像头在本地识别手势与凝视，Jev / Laya 从受限动作空间中选择媒体控制操作。项目把 Choice、Noul、Score、概率过滤、动作执行和效果验证完整展示出来，适合学习 Jev-like 具身智能闭环。
+
+详细教学说明见 [`docs/JEV_LIKE_ARCHITECTURE.md`](docs/JEV_LIKE_ARCHITECTURE.md)。
 
 ## 交互
 
@@ -24,18 +26,21 @@ camera frame (never uploaded)
                                             │
                                      structured state only
                                             │
+                         Choice + Noul + Score（单次请求）
                                   POST /api/decision
                                             │
                           Jev / compatible local endpoint
                                             │
-                           typed action + probabilities
+                         typed judgments + probabilities
                                             │
-                         local irreversible-action guard
+                     confidence filter + safety contracts
                                             │
-                                  HTML media controller
+                       HTML media controller + verification
 ```
 
-`server/jev-client.ts` 调用 TypeSafe 兼容的 `POST /v1/systemone`。没有 API key 时，应用使用 `rule` provider；它不是模型，而是一个离线 Jev 契约模拟器，便于验证完整 UI、传感和安全链路。
+`server/jev-client.ts` 调用 TypeSafe 兼容的 `POST /v1/systemone`。一次请求并行判断候选动作（Choice）、控制意图（Noul）和信号质量（Score）；`server/decision-filter.ts` 再用明确阈值和安全规则决定是否执行。没有 API key 时，应用使用 `rule` provider；它不是模型，而是一个离线 Jev 契约模拟器，便于验证完整 UI、传感和安全链路。
+
+页面中的“教学测试”按钮可以在没有摄像头时把模拟手势送过同一套决策、过滤与执行链路，方便区分模型问题和视觉识别问题。
 
 ## 运行
 
@@ -62,7 +67,7 @@ TYPESAFE_BASE_URL=https://api.typesafe.ai
 TYPESAFE_MODEL=jev-latest
 ```
 
-也可以指向兼容 `/v1/systemone` 的本地服务：
+也可以指向 [`KonghaYao/laya-jev`](https://github.com/KonghaYao/laya-jev) 等兼容 `/v1/systemone` 的本地服务：
 
 ```dotenv
 DECISION_PROVIDER=jev
@@ -79,7 +84,7 @@ API key 只保存在服务端环境变量中，不会发送到前端。
 npm run check
 ```
 
-测试覆盖手势稳定时间、关闭门控和 Jev 请求动作集合。构建检查同时运行严格 TypeScript 类型检查。
+测试覆盖手势稳定时间、Choice/Noul/Score 请求、概率过滤、无效动作和关闭门控。构建检查同时运行严格 TypeScript 类型检查。
 
 ## 设计限制
 

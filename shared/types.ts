@@ -30,6 +30,7 @@ export interface PerceptionState {
   };
   media: {
     hasSource: boolean;
+    ready: boolean;
     paused: boolean;
     playbackRate: number;
   };
@@ -39,13 +40,28 @@ export interface PerceptionState {
   };
 }
 
-export interface DecisionResult {
-  action: AgentAction;
+export interface JevJudgment {
+  candidateAction: AgentAction;
   confidence: number;
   probabilities: Partial<Record<AgentAction, number>>;
+  intentionalControlProbability: number;
+  signalQualityScore: number;
   closeIntentProbability: number;
   provider: "jev" | "rule";
   model: string;
   latencyMs: number;
+}
+
+export interface DecisionCheck {
+  key: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface DecisionResult extends JevJudgment {
+  action: AgentAction;
+  accepted: boolean;
+  filterReason: string;
+  checks: DecisionCheck[];
   guarded?: boolean;
 }

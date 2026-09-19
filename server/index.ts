@@ -3,8 +3,9 @@ import express from "express";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isPerceptionState, ruleDecision } from "./decision-policy.js";
-import { requestJevDecision } from "./jev-client.js";
+import { filterJudgment } from "./decision-filter.js";
+import { isPerceptionState, ruleJudgment } from "./decision-policy.js";
+import { requestJevJudgment } from "./jev-client.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 8787);
@@ -30,11 +31,11 @@ app.post("/api/decision", async (request, response) => {
 
   try {
     const startedAt = performance.now();
-    const result =
+    const judgment =
       configuredProvider === "jev"
-        ? await requestJevDecision(request.body)
-        : ruleDecision(request.body, Math.round(performance.now() - startedAt));
-    response.json(result);
+        ? await requestJevJudgment(request.body)
+        : ruleJudgment(request.body, Math.round(performance.now() - startedAt));
+    response.json(filterJudgment(request.body, judgment));
   } catch (error) {
     response.status(502).json({
       error: error instanceof Error ? error.message : "Decision provider failed",

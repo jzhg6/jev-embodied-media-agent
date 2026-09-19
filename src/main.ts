@@ -37,6 +37,13 @@ const decisionAction = get("decision-action");
 const decisionConfidence = get("decision-confidence");
 const decisionMeta = get("decision-meta");
 const confidenceBar = get("confidence-bar");
+const choiceOutput = get("choice-output");
+const intentOutput = get("intent-output");
+const qualityOutput = get("quality-output");
+const tracePerception = get("trace-perception");
+const traceJudgment = get("trace-judgment");
+const traceFilter = get("trace-filter");
+const traceActuator = get("trace-actuator");
 const providerLabel = get("provider-label");
 const providerPill = get("provider-pill");
 const providerDot = get("provider-dot");
@@ -53,7 +60,9 @@ let gazeStartedAt: number | undefined;
 let closeRequested = false;
 let lastCloseDecisionAt = -Infinity;
 let latchedGesture = "None";
+let lastGestureDispatchAt = -Infinity;
 let decisionPending = false;
+let queuedDecisionState: PerceptionState | undefined;
 let toastTimer = 0;
 let videoObjectUrl: string | undefined;
 let calibrationCapture:
@@ -67,6 +76,9 @@ let calibrationCapture:
 const CLOSE_ARM_MS = 1_500;
 const CLOSE_READY_MS = 3_000;
 const GAZE_THRESHOLD = 0.62;
+const GESTURE_TRIGGER_CONFIDENCE = 0.58;
+const GESTURE_STABLE_MS = 300;
+const GESTURE_RETRY_MS = 1_200;
 
 const controller = new MediaController(media, () => {
   closeRequested = true;
@@ -131,6 +143,7 @@ function perceptionState(observation: VisionObservation, dwellMs: number, score:
     },
     media: {
       hasSource: Boolean(media.src),
+      ready: media.readyState >= HTMLMediaElement.HAVE_METADATA,
       paused: media.paused,
       playbackRate: media.playbackRate,
     },
@@ -141,9 +154,28 @@ function perceptionState(observation: VisionObservation, dwellMs: number, score:
   };
 }
 
-async function requestDecision(state: PerceptionState) {
-  if (decisionPending || closeRequested) return;
-  decisionPending = true;
+function describePerception(state: PerceptionState) {
+  if (state.gaze.ready) {
+    return `凝视右上角 · ${Math.round(state.gaze.dwellMs)} ms · 分数 ${Math.round(state.gaze.topRightScore * 100)}%`;
+  }
+  return `${state.gesture.name.replaceAll("_", " ")} · ${Math.round(state.gesture.confidence * 100)}% · 稳定 ${Math.round(state.gesture.stableMs)} ms`;
+}
+
+function setTrace(
+  element: HTMLElement,
+  text: string,
+  state?: "pass" | "blocked" | "error",
+) {
+  element.textContent = text;
+  element.classList.remove("pass", "blocked", "error");
+  if (state) element.classList.add(state);
+}
+
+async function processDecision(state: PerceptionState) {
+  setTrace(tracePerception, describePerception(state));
+  setTrace(traceJudgment, "正在并行计算 Choice / Noul / Score…");
+  setTrace(traceFilter, "等待判断输出");
+  setTrace(traceActuator, "等待过滤器放行");
   try {
     const response = await fetch("/api/decision", {
       method: "POST",
@@ -154,23 +186,57 @@ async function requestDecision(state: PerceptionState) {
     if (!response.ok) throw new Error(body.error ?? "决策服务请求失败");
     renderDecision(body);
 
-    // The browser repeats the irreversible-action guard even though the server
-    // already applies it. A remote model can never bypass the local contract.
-    if (body.action === "close_page" && !state.safety.allowClose) {
-      logEvent("本地安全层拦截了未完成凝视的关闭动作");
-      return;
-    }
-
     if (body.action !== "none") {
-      const message = await controller.apply(body.action);
-      showToast(message);
-      logEvent(`${body.action.toUpperCase()} · ${Math.round(body.confidence * 100)}%`);
+      // The browser repeats the irreversible-action guard even though the server
+      // already applies it. A remote model can never bypass the local contract.
+      if (body.action === "close_page" && !state.safety.allowClose) {
+        setTrace(traceActuator, "浏览器安全层再次拦截关闭动作", "blocked");
+        logEvent("本地安全层拦截了未完成凝视的关闭动作");
+        return;
+      }
+
+      const result = await controller.apply(body.action);
+      showToast(result.message);
+      setTrace(
+        traceActuator,
+        result.verified ? `已执行并验证：${result.detail}` : `执行未验证：${result.detail}`,
+        result.verified ? "pass" : "error",
+      );
+      logEvent(
+        `${body.action.toUpperCase()} · ${result.verified ? "执行已验证" : "执行未验证"}`,
+      );
       updateMediaReadout();
+    } else {
+      setTrace(traceActuator, "未执行：过滤器没有放行动作", "blocked");
+      if (body.candidateAction !== "none") {
+        logEvent(`${body.candidateAction.toUpperCase()} 被过滤：${body.filterReason}`);
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "决策失败";
     logEvent(message);
+    setTrace(traceJudgment, message, "error");
+    setTrace(traceFilter, "决策请求失败，未执行", "error");
+    setTrace(traceActuator, "未执行", "error");
     providerDot.classList.add("error");
+  }
+}
+
+async function requestDecision(state: PerceptionState) {
+  if (closeRequested) return;
+  queuedDecisionState = state;
+  if (decisionPending) {
+    setTrace(traceJudgment, "已有判断运行中；最新感知已进入单槽队列");
+    return;
+  }
+
+  decisionPending = true;
+  try {
+    while (queuedDecisionState && !closeRequested) {
+      const nextState = queuedDecisionState;
+      queuedDecisionState = undefined;
+      await processDecision(nextState);
+    }
   } finally {
     decisionPending = false;
   }
@@ -178,9 +244,22 @@ async function requestDecision(state: PerceptionState) {
 
 function renderDecision(decision: DecisionResult) {
   decisionAction.textContent = decision.action.toUpperCase();
-  decisionConfidence.textContent = `${Math.round(decision.confidence * 100)}%`;
-  confidenceBar.style.width = `${Math.round(decision.confidence * 100)}%`;
+  const actionProbability = decision.probabilities[decision.candidateAction] ?? 0;
+  decisionConfidence.textContent = `${Math.round(actionProbability * 100)}%`;
+  confidenceBar.style.width = `${Math.round(actionProbability * 100)}%`;
   decisionMeta.textContent = `${decision.model} · ${decision.latencyMs} ms${decision.guarded ? " · guarded" : ""}`;
+  choiceOutput.textContent = `${decision.candidateAction} · ${Math.round(actionProbability * 100)}%`;
+  intentOutput.textContent = `${Math.round(decision.intentionalControlProbability * 100)}%`;
+  qualityOutput.textContent = `${decision.signalQualityScore.toFixed(2)} / 2`;
+  setTrace(
+    traceJudgment,
+    `Choice=${decision.candidateAction}；Noul=${Math.round(decision.intentionalControlProbability * 100)}%；Score=${decision.signalQualityScore.toFixed(2)}`,
+  );
+  setTrace(
+    traceFilter,
+    decision.accepted ? `通过：${decision.filterReason}` : `拦截：${decision.filterReason}`,
+    decision.accepted ? "pass" : "blocked",
+  );
   providerPill.textContent = decision.provider === "jev" ? "LIVE JEV" : "LOCAL CONTRACT";
 }
 
@@ -212,6 +291,12 @@ function onVisionObservation(observation: VisionObservation) {
   latestObservation = observation;
   gestureState.textContent = observation.gesture.name.replaceAll("_", " ");
   gestureConfidence.textContent = `${Math.round(observation.gesture.confidence * 100)}%`;
+  if (!decisionPending) {
+    setTrace(
+      tracePerception,
+      `${observation.gesture.name.replaceAll("_", " ")} · ${Math.round(observation.gesture.confidence * 100)}% · 稳定 ${Math.round(observation.gesture.stableMs)} ms`,
+    );
+  }
   cameraLabel.textContent = observation.faceDetected ? "面部与手势感知中" : "请保持面部可见";
 
   if (calibrationCapture && observation.faceDetected) {
@@ -252,11 +337,13 @@ function onVisionObservation(observation: VisionObservation) {
   );
   if (
     supportedGesture &&
-    observation.gesture.confidence >= 0.72 &&
-    observation.gesture.stableMs >= 350 &&
-    observation.gesture.name !== latchedGesture
+    observation.gesture.confidence >= GESTURE_TRIGGER_CONFIDENCE &&
+    observation.gesture.stableMs >= GESTURE_STABLE_MS &&
+    (observation.gesture.name !== latchedGesture ||
+      observation.at - lastGestureDispatchAt >= GESTURE_RETRY_MS)
   ) {
     latchedGesture = observation.gesture.name;
+    lastGestureDispatchAt = observation.at;
     void requestDecision(state);
   } else if (observation.gesture.name === "None" || observation.gesture.confidence < 0.55) {
     latchedGesture = "None";
@@ -292,6 +379,23 @@ videoFile.addEventListener("change", () => {
   logEvent(`已载入本地视频：${file.name}`);
 });
 
+document.querySelectorAll<HTMLButtonElement>(".simulate-gesture").forEach((button) => {
+  button.addEventListener("click", () => {
+    const name = button.dataset.gesture;
+    if (!name) return;
+    const observation: VisionObservation = {
+      at: performance.now(),
+      gesture: { name, confidence: 0.94, stableMs: 700 },
+      gazeVector: [],
+      faceDetected: false,
+    };
+    gestureState.textContent = name.replaceAll("_", " ");
+    gestureConfidence.textContent = "94%";
+    logEvent(`教学模拟：${name}`);
+    void requestDecision(perceptionState(observation, 0, 0));
+  });
+});
+
 for (const event of ["play", "pause", "ratechange", "loadedmetadata"] as const) {
   media.addEventListener(event, updateMediaReadout);
 }
@@ -301,12 +405,12 @@ startCamera.addEventListener("click", async () => {
   startCamera.textContent = "正在加载视觉模型…";
   visionStatus.textContent = "加载中";
   try {
-      vision = new VisionRuntime(camera, onVisionObservation, (status) => {
-        if (status === "awaiting-camera") {
-          startCamera.textContent = "请在浏览器中允许摄像头…";
-          visionStatus.textContent = "等待授权";
-        }
-      });
+    vision = new VisionRuntime(camera, onVisionObservation, (status) => {
+      if (status === "awaiting-camera") {
+        startCamera.textContent = "请在浏览器中允许摄像头…";
+        visionStatus.textContent = "等待授权";
+      }
+    });
     await vision.start();
     startCamera.textContent = "摄像头已启动";
     visionStatus.textContent = "运行中";

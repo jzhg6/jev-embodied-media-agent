@@ -30,7 +30,9 @@ export class VisionRuntime {
   private frameId = 0;
   private lastInferenceAt = 0;
   private gestureName = "None";
+  private gestureConfidence = 0;
   private gestureStartedAt = 0;
+  private lastGestureSeenAt = 0;
   private running = false;
 
   constructor(
@@ -117,8 +119,16 @@ export class VisionRuntime {
     const topGesture = gestureResult.gestures?.[0]?.[0];
     const name = topGesture?.categoryName ?? "None";
     const confidence = topGesture?.score ?? 0;
-    if (name !== this.gestureName || confidence < 0.55) {
-      this.gestureName = confidence >= 0.55 ? name : "None";
+    if (confidence >= 0.55 && name !== "None") {
+      if (name !== this.gestureName) {
+        this.gestureName = name;
+        this.gestureStartedAt = now;
+      }
+      this.gestureConfidence = confidence;
+      this.lastGestureSeenAt = now;
+    } else if (now - this.lastGestureSeenAt > 240) {
+      this.gestureName = "None";
+      this.gestureConfidence = 0;
       this.gestureStartedAt = now;
     }
 
@@ -135,7 +145,7 @@ export class VisionRuntime {
       at: now,
       gesture: {
         name: this.gestureName,
-        confidence: this.gestureName === "None" ? 0 : confidence,
+        confidence: this.gestureConfidence,
         stableMs: this.gestureName === "None" ? 0 : now - this.gestureStartedAt,
       },
       gazeVector,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PerceptionState } from "../shared/types.js";
-import { buildJevRequest, ruleDecision } from "../server/decision-policy.js";
+import { filterJudgment } from "../server/decision-filter.js";
+import { buildJevRequest, ruleJudgment } from "../server/decision-policy.js";
 
 function state(overrides: Partial<PerceptionState> = {}): PerceptionState {
   return {
@@ -13,7 +14,7 @@ function state(overrides: Partial<PerceptionState> = {}): PerceptionState {
       armed: false,
       ready: false,
     },
-    media: { hasSource: true, paused: false, playbackRate: 1 },
+    media: { hasSource: true, ready: true, paused: false, playbackRate: 1 },
     safety: {
       allowClose: false,
       closePolicy: "calibrated-continuous-dwell",
@@ -24,20 +25,20 @@ function state(overrides: Partial<PerceptionState> = {}): PerceptionState {
 
 describe("offline Jev-contract simulator", () => {
   it("maps a stable open palm to pause", () => {
-    const result = ruleDecision(
-      state({
+    const current = state({
         gesture: { name: "Open_Palm", confidence: 0.91, stableMs: 500 },
-      }),
-    );
+      });
+    const result = filterJudgment(current, ruleJudgment(current));
+    expect(result.candidateAction).toBe("pause");
     expect(result.action).toBe("pause");
+    expect(result.accepted).toBe(true);
   });
 
   it("does not act on an unstable gesture", () => {
-    const result = ruleDecision(
-      state({
+    const current = state({
         gesture: { name: "Thumb_Up", confidence: 0.95, stableMs: 100 },
-      }),
-    );
+      });
+    const result = filterJudgment(current, ruleJudgment(current));
     expect(result.action).toBe("none");
   });
 
@@ -49,21 +50,32 @@ describe("offline Jev-contract simulator", () => {
       armed: true,
       ready: true,
     };
-    expect(ruleDecision(state({ gaze })).action).toBe("none");
+    const disallowed = state({ gaze });
+    expect(filterJudgment(disallowed, ruleJudgment(disallowed)).action).toBe("none");
+    const allowed = state({
+      gaze,
+      safety: {
+        allowClose: true,
+        closePolicy: "calibrated-continuous-dwell",
+      },
+    });
     expect(
-      ruleDecision(
-        state({
-          gaze,
-          safety: {
-            allowClose: true,
-            closePolicy: "calibrated-continuous-dwell",
-          },
-        }),
-      ).action,
+      filterJudgment(allowed, ruleJudgment(allowed)).action,
     ).toBe("close_page");
   });
 
-  it("describes every supported action to Jev", () => {
+  it("filters a pause no-op when the video is already paused", () => {
+    const current = state({
+      gesture: { name: "Open_Palm", confidence: 0.94, stableMs: 700 },
+      media: { hasSource: true, ready: true, paused: true, playbackRate: 1 },
+    });
+    const result = filterJudgment(current, ruleJudgment(current));
+    expect(result.candidateAction).toBe("pause");
+    expect(result.action).toBe("none");
+    expect(result.filterReason).toContain("播放状态");
+  });
+
+  it("describes every supported action and all three typed primitives to Jev", () => {
     const request = buildJevRequest(state(), "jev-latest");
     expect(Object.keys(request.questions.action.criteria)).toEqual([
       "none",
@@ -73,5 +85,7 @@ describe("offline Jev-contract simulator", () => {
       "slow_down",
       "close_page",
     ]);
+    expect(request.questions.intentional_control.type).toBe("noul");
+    expect(request.questions.signal_quality.type).toBe("score");
   });
 });
