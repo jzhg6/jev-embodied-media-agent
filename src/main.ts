@@ -6,6 +6,11 @@ import type {
 } from "../shared/types";
 import { GazeCalibrator } from "./gaze";
 import { MediaController } from "./media-controller";
+import {
+  OPEN_PALM_REFLEX_CONFIDENCE,
+  OPEN_PALM_REFLEX_STABLE_MS,
+  shouldPauseWithOpenPalmReflex,
+} from "./reflex";
 import { VisionRuntime, type VisionObservation } from "./vision";
 
 const get = <T extends HTMLElement>(id: string) => {
@@ -19,6 +24,7 @@ const camera = get<HTMLVideoElement>("camera");
 const videoFile = get<HTMLInputElement>("video-file");
 const emptyState = get("empty-state");
 const startCamera = get<HTMLButtonElement>("start-camera");
+const stopCamera = get<HTMLButtonElement>("stop-camera");
 const calibrateCenter = get<HTMLButtonElement>("calibrate-center");
 const calibrateClose = get<HTMLButtonElement>("calibrate-close");
 const calibrationStatus = get("calibration-status");
@@ -63,6 +69,7 @@ let latchedGesture = "None";
 let lastGestureDispatchAt = -Infinity;
 let decisionPending = false;
 let queuedDecisionState: PerceptionState | undefined;
+let reflexPausePending = false;
 let toastTimer = 0;
 let videoObjectUrl: string | undefined;
 let calibrationCapture:
@@ -76,8 +83,8 @@ let calibrationCapture:
 const CLOSE_ARM_MS = 1_500;
 const CLOSE_READY_MS = 3_000;
 const GAZE_THRESHOLD = 0.62;
-const GESTURE_TRIGGER_CONFIDENCE = 0.58;
-const GESTURE_STABLE_MS = 300;
+const GESTURE_TRIGGER_CONFIDENCE = OPEN_PALM_REFLEX_CONFIDENCE;
+const GESTURE_STABLE_MS = OPEN_PALM_REFLEX_STABLE_MS;
 const GESTURE_RETRY_MS = 1_200;
 
 const controller = new MediaController(media, () => {
@@ -169,6 +176,31 @@ function setTrace(
   element.textContent = text;
   element.classList.remove("pass", "blocked", "error");
   if (state) element.classList.add(state);
+}
+
+async function applyOpenPalmSafetyReflex(state: PerceptionState) {
+  if (reflexPausePending || !shouldPauseWithOpenPalmReflex(state)) {
+    return;
+  }
+
+  reflexPausePending = true;
+  try {
+    setTrace(traceFilter, "本地安全反射：Open Palm 可直接暂停", "pass");
+    const result = await controller.apply("pause");
+    decisionAction.textContent = "PAUSE";
+    showToast(result.message);
+    setTrace(
+      traceActuator,
+      result.verified
+        ? `安全反射已执行并验证：${result.detail}`
+        : `安全反射执行未验证：${result.detail}`,
+      result.verified ? "pass" : "error",
+    );
+    logEvent(`PAUSE · Open Palm 本地安全反射${result.verified ? "已验证" : "未验证"}`);
+    updateMediaReadout();
+  } finally {
+    reflexPausePending = false;
+  }
 }
 
 async function processDecision(state: PerceptionState) {
@@ -344,6 +376,9 @@ function onVisionObservation(observation: VisionObservation) {
   ) {
     latchedGesture = observation.gesture.name;
     lastGestureDispatchAt = observation.at;
+    if (observation.gesture.name === "Open_Palm") {
+      void applyOpenPalmSafetyReflex(state);
+    }
     void requestDecision(state);
   } else if (observation.gesture.name === "None" || observation.gesture.confidence < 0.55) {
     latchedGesture = "None";
@@ -392,7 +427,9 @@ document.querySelectorAll<HTMLButtonElement>(".simulate-gesture").forEach((butto
     gestureState.textContent = name.replaceAll("_", " ");
     gestureConfidence.textContent = "94%";
     logEvent(`教学模拟：${name}`);
-    void requestDecision(perceptionState(observation, 0, 0));
+    const state = perceptionState(observation, 0, 0);
+    if (name === "Open_Palm") void applyOpenPalmSafetyReflex(state);
+    void requestDecision(state);
   });
 });
 
@@ -414,17 +451,44 @@ startCamera.addEventListener("click", async () => {
     await vision.start();
     startCamera.textContent = "摄像头已启动";
     visionStatus.textContent = "运行中";
+    stopCamera.disabled = false;
     cameraLabel.textContent = "本地视觉模型运行中";
     calibrateCenter.disabled = false;
     calibrateClose.disabled = false;
     calibrationStatus.textContent = calibrator.calibrated ? "已加载校准" : "未校准";
     logEvent("MediaPipe 手势与面部模型已启动");
   } catch (error) {
+    await vision?.stop();
+    vision = undefined;
     startCamera.disabled = false;
     startCamera.textContent = "重试启动摄像头";
+    stopCamera.disabled = true;
     visionStatus.textContent = "启动失败";
     logEvent(error instanceof Error ? error.message : "摄像头启动失败");
   }
+});
+
+stopCamera.addEventListener("click", async () => {
+  stopCamera.disabled = true;
+  stopCamera.textContent = "正在关闭…";
+  await vision?.stop();
+  vision = undefined;
+  latestObservation = undefined;
+  gazeStartedAt = undefined;
+  calibrationCapture = undefined;
+  latchedGesture = "None";
+  queuedDecisionState = undefined;
+  cameraLabel.textContent = "摄像头已关闭";
+  visionStatus.textContent = "已关闭";
+  gestureState.textContent = "—";
+  gestureConfidence.textContent = "0%";
+  calibrateCenter.disabled = true;
+  calibrateClose.disabled = true;
+  startCamera.disabled = false;
+  startCamera.textContent = "重新启动摄像头与模型";
+  stopCamera.textContent = "关闭摄像头";
+  setTrace(tracePerception, "摄像头已关闭");
+  logEvent("摄像头与本地视觉模型已关闭");
 });
 
 calibrateCenter.addEventListener("click", () => beginCalibration("center"));
@@ -439,6 +503,7 @@ reopenSession.addEventListener("click", () => {
   get("app").removeAttribute("hidden");
   startCamera.disabled = false;
   startCamera.textContent = "重新启动摄像头与模型";
+  stopCamera.disabled = true;
   visionStatus.textContent = "已停止";
   logEvent("会话已重新打开");
 });

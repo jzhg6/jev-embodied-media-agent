@@ -34,6 +34,15 @@ describe("offline Jev-contract simulator", () => {
     expect(result.accepted).toBe(true);
   });
 
+  it("accepts a lower-confidence but stable open palm safety gesture", () => {
+    const current = state({
+      gesture: { name: "Open_Palm", confidence: 0.55, stableMs: 240 },
+    });
+    const result = filterJudgment(current, ruleJudgment(current));
+    expect(result.candidateAction).toBe("pause");
+    expect(result.action).toBe("pause");
+  });
+
   it("does not act on an unstable gesture", () => {
     const current = state({
         gesture: { name: "Thumb_Up", confidence: 0.95, stableMs: 100 },

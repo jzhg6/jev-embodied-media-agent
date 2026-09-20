@@ -132,9 +132,14 @@
               <h3>1. 视觉感知</h3>
               <span id="vision-status" class="mini-status">未启动</span>
             </div>
-            <button id="start-camera" class="primary-button" type="button">
-              启动摄像头与模型
-            </button>
+            <div class="camera-buttons">
+              <button id="start-camera" class="primary-button" type="button">
+                启动摄像头与模型
+              </button>
+              <button id="stop-camera" class="secondary-button" type="button" disabled>
+                关闭摄像头
+              </button>
+            </div>
             <p class="hint">
               MediaPipe 在浏览器本地处理画面；仅手势、凝视分数和播放器状态会发送给决策服务。
             </p>

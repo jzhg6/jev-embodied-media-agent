@@ -13,7 +13,7 @@ export const ACTIONS: AgentAction[] = [
   "close_page",
 ];
 
-export const GESTURE_STABLE_MS = 300;
+export const GESTURE_STABLE_MS = 220;
 
 const gestureActions: Record<string, AgentAction> = {
   Open_Palm: "pause",

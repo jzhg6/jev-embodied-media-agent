@@ -145,6 +145,7 @@ h3 { font-size: 13px; margin-bottom: 0; }
 .primary-button:disabled { opacity: .55; cursor: progress; transform: none; }
 .secondary-button { padding: 9px 10px; color: #dbe5de; background: #1b2223; border-color: var(--line); font-size: 11px; }
 .secondary-button:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+.camera-buttons { display: grid; grid-template-columns: 1fr 94px; gap: 7px; }
 
 .video-shell {
   position: relative;

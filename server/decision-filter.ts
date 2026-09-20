@@ -15,8 +15,8 @@ const expectedGesture: Partial<Record<AgentAction, string>> = {
 
 const probabilityThreshold: Record<AgentAction, number> = {
   none: 1,
-  pause: 0.58,
-  play: 0.58,
+  pause: 0.52,
+  play: 0.52,
   speed_up: 0.65,
   slow_down: 0.65,
   close_page: 0.82,
@@ -52,13 +52,13 @@ export function filterJudgment(
     ),
     check(
       "intent",
-      judgment.intentionalControlProbability >= 0.56,
-      `意图概率 ${(judgment.intentionalControlProbability * 100).toFixed(0)}% / 阈值 56%`,
+      judgment.intentionalControlProbability >= 0.5,
+      `意图概率 ${(judgment.intentionalControlProbability * 100).toFixed(0)}% / 阈值 50%`,
     ),
     check(
       "quality",
-      judgment.signalQualityScore >= 0.9,
-      `信号质量 ${judgment.signalQualityScore.toFixed(2)} / 阈值 0.90`,
+      judgment.signalQualityScore >= 0.45,
+      `信号质量 ${judgment.signalQualityScore.toFixed(2)} / 阈值 0.45`,
     ),
   );
 
@@ -81,8 +81,8 @@ export function filterJudgment(
       ),
       check(
         "stable-dwell",
-        state.gesture.stableMs >= 300,
-        `稳定 ${Math.round(state.gesture.stableMs)} ms / 阈值 300 ms`,
+        state.gesture.stableMs >= 220,
+        `稳定 ${Math.round(state.gesture.stableMs)} ms / 阈值 220 ms`,
       ),
     );
 
